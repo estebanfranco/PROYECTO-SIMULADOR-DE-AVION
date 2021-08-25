@@ -1,210 +1,118 @@
-/*
-   CSCI 435A Embedded Systems
-   Authors: Angad Virk, Zale Young
-   
-   Video Game Controller
-   Report Website: https://go.middlebury.edu/sbox
-*/
+//Arduino Joystick 2.0 Library, by MHeironimus (https://github.com/MHeironimus)
+//Beginners Guide, by Daniel Cantore
+//Example Code (Oct 2020), with in-depth commenting 
 
-#include <Arduino.h>
-#include <XInput.h>
+//Initial Definitions and Setup
+//Libary Inclusion
+#include <Joystick.h>
 
-// Define Pin number constants
-#define UP_BUTTON 4
-#define DOWN_BUTTON 5
-#define LEFT_BUTTON 6
-#define RIGHT_BUTTON 7
+//Define and Allocate Input Pins to memorable names
+#define joyX A0
+#define joyY A1
+#define joyRZ A3
+#define joyThrottle A2
+#define joyButton1 9
+#define joyButton2 8
+#define joyButton3 7
 
-#define Y_BUTTON 8
-#define A_BUTTON 9
-#define X_BUTTON 10
-#define B_BUTTON 11
+//Initializing Axis as Integers, at a 0 default value
+int xAxis_ = 0;
+int yAxis_ = 0;
+int rzAxis_ = 0;
+int throttle_ = 0;
 
-#define INVERT_LEFT false  // set to true to use inverted left joy Y
-#define LEFT_JOY_X A0
-#define LEFT_JOY_Y A1
-#define LEFT_JOY_SEL 2
+//Setting up Buttons
+//Updating a static variable gives greater stability than reading directly from the digital pin.
+//Giving Default Values to the Buttons for later use
+  int lastButton1State = 0;
+  int lastButton2State = 0;
+  int lastButton3State = 0;
 
-#define INVERT_RIGHT true  // set to true to use inverted right joy Y
-#define RIGHT_JOY_X A2
-#define RIGHT_JOY_Y A3
-#define RIGHT_JOY_SEL 3
+//Defining the Joystick
+//The Joystick is defined in the following setup:
+//Joystick(Joystick HID ID, Joystick Type, Button Count, Hat Switch Count, Include X, Include Y, Include Z, Include Rx, Include Ry, Include Rz, Include Rudder, Include Throttle, Include Accelerator, Include Brake, Include Steering
+//Joystick HID ID: A Hex value identifier for HID Device Recognition (default: 0x03). DO NOT USE 0x01 or 0x02
+//Joystick type: Define the type of joystick from the types supported. Types: DEFAULT Joystick (0x04 or JOYSTICK_TYPE_JOYSTICK), Gamepad (0x05 or JOYSTICK_TYPE_GAMEPAD), Multi-Axis Controller (0x08 or JOYSTICK_TYPE_MULTI_AXIS)
+//Button Count: Number of Buttons shown to HID system (default: 32)
+//Hat Switch Count: Number of Hat Switches, max 2. (default:2)
+//Include X Axis: Determines whether the X axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Y Axis: Determines whether the Y axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Z Axis: Determines whether the Z axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Rx Axis: Determines whether the X Rotational axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Ry Axis: Determines whether the Y Rotational axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Rz Axis: Determines whether the Z Rotational axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Rudder: Determines whether a Rudder axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Throttle: Determines whether a Throttle axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Accelerator: Determines whether an Accelerator axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Brake: Determines whether a Brake axis is avalible for used by the HID system, defined as a bool value (default:true)
+//Include Steering: Determines whether a Steering axis is avalible for used by the HID system, defined as a bool value (default:true)
 
-#define ANALOG_MAX 1023 // Analog Input returns values from 0 to 1023 for joystick moves
+Joystick_ Joystick(0x12, JOYSTICK_TYPE_JOYSTICK, 3, 0,true,true,false,false,false,true,false,true,false,false,false);
 
-#define JOY_MOVE_THRESH 10 // Threshold to account for noise in potentiometer voltage when joystick is at rest
-
-#define DEBUG true
+//Set Auto Send State
+//Enables Auto Sending, allowing the controller to send information to the HID system, rather than waiting to be asked.
+const bool initAutoSendState = true;
 
 void setup() {
+  //Initialize Buttons
+  //Buttons set up between Digital Pin and Ground, following pin allocations from earlier on
+  pinMode(joyButton1, INPUT_PULLUP);
+  pinMode(joyButton2, INPUT_PULLUP);
+  pinMode(joyButton3, INPUT_PULLUP);
 
-  //TODO: CHANGE TO INPUT_PULLUP AND CONNECT TO GROUND AND USE ACTIVE
-  pinMode(UP_BUTTON, INPUT_PULLUP);
-  pinMode(DOWN_BUTTON, INPUT_PULLUP);
-  pinMode(LEFT_BUTTON, INPUT_PULLUP);
-  pinMode(RIGHT_BUTTON, INPUT_PULLUP);
-  
-  pinMode(Y_BUTTON, INPUT_PULLUP);
-  pinMode(A_BUTTON, INPUT_PULLUP);
-  pinMode(X_BUTTON, INPUT_PULLUP);
-  pinMode(B_BUTTON, INPUT_PULLUP);
-
-  pinMode(LEFT_JOY_X, INPUT);
-  pinMode(LEFT_JOY_Y, INPUT);
-  pinMode(LEFT_JOY_SEL, INPUT_PULLUP);
-
-  pinMode(RIGHT_JOY_X, INPUT);
-  pinMode(RIGHT_JOY_Y, INPUT);
-  pinMode(RIGHT_JOY_SEL, INPUT_PULLUP);
-
-
-  Serial.begin(115200);
-  
-  XInput.setJoystickRange(0, 1023);
-  XInput.setAutoSend(false);
-
-  XInput.begin();
-}
-
-// Variables to store the state of the button inputs
-boolean up, down, left, right;
-boolean button_y, button_a, button_x, button_b;
-
-int leftx, lefty;
-int rightx, righty;
-boolean leftz, rightz;
-
-int absolute(int x){
-  return x < 0 ? -x : x;
-}
-
-// Function to read the state of all inputs. 
-// Buttons are active low. Joysticks are analog inputs
-void readState(){
-  // Read state of Directional Buttons
-  left = digitalRead(LEFT_BUTTON) == LOW;
-  right = digitalRead(RIGHT_BUTTON) == LOW;
-  up = digitalRead(UP_BUTTON) == LOW;
-  down = digitalRead(DOWN_BUTTON) == LOW;
-
-  // Read state of Action Buttons
-  button_y = digitalRead(Y_BUTTON) == LOW;
-  button_a = digitalRead(A_BUTTON) == LOW;
-  button_x = digitalRead(X_BUTTON) == LOW;
-  button_b = digitalRead(B_BUTTON) == LOW;
-
-  // Read State of Joystick and Joystick Buttons
-  leftx = analogRead(LEFT_JOY_X);
-  lefty = analogRead(LEFT_JOY_Y);
-  leftz = digitalRead(LEFT_JOY_SEL) == LOW;
-
-  rightx = analogRead(RIGHT_JOY_X);
-  righty = analogRead(RIGHT_JOY_Y);
-  rightz = digitalRead(RIGHT_JOY_SEL) == LOW;
-}
-
-// Set the state of the directional pad based on button inputs
-void setDPads(){
-  XInput.setDpad(up, down, left, right);
-
-  #if DEBUG 
-    if(up){
-      Serial.println("up");
-    }
-    if(right){
-      Serial.println("right");
-    }
-    if(down){
-      Serial.println("down");
-    }
-    if(left){
-      Serial.println("left");
-    }
-  #endif
-}
-
-// Sets the state of the button based on condition (state of the input)
-void conditionalPress(boolean condition, int button, char* message){
-  XInput.setButton(button, condition);
-
-  #if DEBUG 
-    if(condition){
-      Serial.println(message);
-    }
-  #endif
-}
-
-// Set the state of the Joystick buttons and the A,B,X,Y buttons
-void setButtons(){
-  conditionalPress(leftz, TRIGGER_LEFT, "LeftJoyButton");
-  conditionalPress(rightz, TRIGGER_RIGHT, "RightJoyButton");
-
-  conditionalPress(button_y, BUTTON_Y, "YButton");
-  conditionalPress(button_a, BUTTON_A, "AButton");
-  conditionalPress(button_x, BUTTON_X, "XButton");
-  conditionalPress(button_b, BUTTON_B, "BButton");
-
-}
-
-// Set the state of the joysticks. 
-void setJoy(){
-  int joy_center = ANALOG_MAX/2;
-
-  // Account for imperfect center voltages by ensurint that the joystick 
-  // is moved beyond a certain amount/threshold
-  int leftXValue =  absolute(leftx - joy_center) > JOY_MOVE_THRESH ?
-                    leftx :
-                    joy_center;
-                    
-  int leftYValue =  absolute(lefty - joy_center) > JOY_MOVE_THRESH ?
-                    lefty :
-                    joy_center;
-                    
-  int rightXValue =  absolute(rightx - joy_center) > JOY_MOVE_THRESH ?
-                    rightx :
-                    joy_center;
-                    
-  int rightYValue =  absolute(righty - joy_center) > JOY_MOVE_THRESH ?
-                    righty :
-                    joy_center;                              
-
-  // Invert Joystick movement if the variables are set.
-  // Our right joystick is upside down so we have set INVERT_RIGHT to true above. 
-  if(INVERT_LEFT){
-    leftXValue = ANALOG_MAX - leftXValue;
-    leftYValue = ANALOG_MAX - leftYValue;
-  }
-
-  if(INVERT_RIGHT){
-    rightXValue = ANALOG_MAX - rightXValue;
-    rightYValue = ANALOG_MAX - rightYValue;
-  }
-
-  // Set Left Joystick state 
-  XInput.setJoystick(JOY_LEFT, leftXValue, leftYValue);
-  XInput.setJoystick(JOY_RIGHT, rightXValue, rightYValue);
-  
-  #if DEBUG
-    Serial.println(leftx);
-    Serial.println(lefty);
-    Serial.println(rightx);
-    Serial.println(righty);
-  #endif
-  
+  //Start Joystick - Needed to start the Joystick function libary
+  Joystick.begin();
 }
 
 void loop() {
-  // READ IN THE STATE AND SET GLOBAL VARIABLES
-  readState();
+  
+  //Axis Reading during Runtime
+  //Setting Read functions for each axis and parsing correctly. The X axis will be used as an example for explanation
 
-  // Set XInput States
-  setDPads();
-  setButtons();
-  setJoy();
+  //Reading the X Axis analog pin to the xAxis_ variable for processing
+  xAxis_ = analogRead(joyX);
+  //Mapping the X Axis data from a 0-1023 to 0-255 range for a smoother action
+  xAxis_ = map(xAxis_,0,1023,0,255);
+  //Set the Joystick X Axis value as the new, smoother, value
+  Joystick.setXAxis(xAxis_);
 
-  XInput.send();
+  yAxis_ = analogRead(joyY);
+  yAxis_ = map(yAxis_,0,1023,0,255);
+  Joystick.setYAxis(yAxis_);
 
-  //simple debounce
-  delay(100);
+  rzAxis_ = analogRead(joyRZ);
+  rzAxis_ = map(rzAxis_,0,1023,0,255);
+  Joystick.setRzAxis(rzAxis_);
 
-} 
+  throttle_ = analogRead(joyThrottle);
+  throttle_ = map(throttle_,0,1023,0,255);
+  Joystick.setThrottle(throttle_);
+  
+  //Button Reading during Runtime
+  //Setting Read functions for each button, using a state value for memory. Button 1 will be used as an example for explanation
+
+  //Reading the current Button digital pin to the Current Button State for processing
+  int currentButton1State = !digitalRead(joyButton1);
+  //If loop - Check that the button has actually changed.
+  if (currentButton1State != lastButton1State){
+    //If the button has changed, set the specified HID button to the Current Button State
+    Joystick.setButton(0, currentButton1State);
+    //Update the Stored Button State
+    lastButton1State = currentButton1State;
+  }
+
+    int currentButton2State = !digitalRead(joyButton2);
+  if (currentButton2State != lastButton2State){
+    Joystick.setButton(1, currentButton2State);
+    lastButton2State = currentButton2State;
+  }
+    int currentButton3State = !digitalRead(joyButton3);
+  if (currentButton3State != lastButton3State){
+    Joystick.setButton(2, currentButton3State);
+    lastButton3State = currentButton3State;
+  }
+
+//Pole Delay/Debounce
+//To reduce unessecary processing, the frequency of the reading loop is delayed. The value(in ms) can be changed to match requirement
+delay(10);
+}
